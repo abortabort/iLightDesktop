@@ -87,7 +87,10 @@ MainDialog::MainDialog(QWidget *parent)
     createUi();
     m_adjustTimer.setSingleShot(true); m_adjustTimer.setInterval(140);
     connect(&m_adjustTimer, &QTimer::timeout, this, [this] {
-        const bool includeWarm = m_pendingWarm; m_pendingWarm = false; applyLight(includeWarm);
+        const bool includeWarm = m_pendingWarm;
+        const bool selectChannel = !m_pendingBrightness;
+        m_pendingWarm = false; m_pendingBrightness = false;
+        applyLight(includeWarm, selectChannel);
     });
     connect(m_client, &BluetoothClient::deviceFound, this, [this](const QString &name, const QString &address) {
         for (int i = 0; i < m_devices->count(); ++i) {
@@ -201,7 +204,7 @@ void MainDialog::createUi() {
     auto powerLayout = new QVBoxLayout;
     auto on = new QPushButton(tr("开灯"), m_controls); auto off = new QPushButton(tr("关灯"), m_controls);
     on->setMinimumWidth(100); off->setMinimumWidth(100); powerLayout->addStretch(); powerLayout->addWidget(on); powerLayout->addWidget(off); powerLayout->addStretch(); topRow->addLayout(powerLayout);
-    connect(on, &QPushButton::clicked, this, [this] { m_adjustTimer.stop(); m_pendingWarm = false; if (m_demo) { m_power = true; updatePreview(); } if (lampType() == 2 && isWhiteColor()) applyLight(false); else sendCommand(ilight::command(activeLampType(), 3, 1, {1})); });
+    connect(on, &QPushButton::clicked, this, [this] { m_adjustTimer.stop(); m_pendingWarm = false; if (m_demo) { m_power = true; updatePreview(); } sendCommand(ilight::command(activeLampType(), 3, 1, {1})); });
     connect(off, &QPushButton::clicked, this, [this] { m_adjustTimer.stop(); m_pendingWarm = false; if (m_demo) { m_power = false; updatePreview(); } sendCommand(ilight::command(activeLampType(), 3, 1, {2})); });
     lightLayout->addLayout(topRow, 1);
     auto brightnessRow = new QHBoxLayout;
@@ -219,7 +222,7 @@ void MainDialog::createUi() {
             m_red->setValue(adjusted.red()); m_green->setValue(adjusted.green()); m_blue->setValue(adjusted.blue());
         }
         updatePreview();
-        if (m_ready || m_demo) m_adjustTimer.start();
+        if (m_ready || m_demo) { m_pendingBrightness = true; m_adjustTimer.start(); }
     });
 
     QVBoxLayout *whiteLayout; m_whitePanel = createPanel(&whiteLayout, m_controls);
@@ -227,7 +230,7 @@ void MainDialog::createUi() {
     auto warmRow = new QHBoxLayout;
     warmRow->addWidget(new QLabel(tr("暖白"), m_whitePanel)); m_warm = createSlider(m_whitePanel, 255, 128); warmRow->addWidget(m_warm, 1); warmRow->addWidget(new QLabel(tr("冷白"), m_whitePanel)); whiteLayout->addLayout(warmRow);
     connect(m_warm, &QSlider::valueChanged, this, [this] {
-        updatePreview(); if (m_ready || m_demo) { m_pendingWarm = true; m_adjustTimer.start(); }
+        updatePreview(); if (m_ready || m_demo) { m_pendingBrightness = false; m_pendingWarm = true; m_adjustTimer.start(); }
     });
     lightLayout->addWidget(m_whitePanel);
 
@@ -255,7 +258,7 @@ void MainDialog::createUi() {
     auto rgbForm = new QFormLayout;
     m_red = createSlider(m_colorPanel, 255, 255); m_green = createSlider(m_colorPanel, 255, 160); m_blue = createSlider(m_colorPanel, 255, 64);
     rgbForm->addRow(tr("红"), m_red); rgbForm->addRow(tr("绿"), m_green); rgbForm->addRow(tr("蓝"), m_blue); colorLayout->addLayout(rgbForm);
-    for (auto slider : {m_red, m_green, m_blue}) connect(slider, &QSlider::valueChanged, this, [this] { syncColorBrightness(); updatePreview(); if (m_ready || m_demo) m_adjustTimer.start(); });
+    for (auto slider : {m_red, m_green, m_blue}) connect(slider, &QSlider::valueChanged, this, [this] { m_pendingBrightness = false; m_pendingWarm = false; syncColorBrightness(); updatePreview(); if (m_ready || m_demo) m_adjustTimer.start(); });
     m_effect = new QComboBox(m_colorPanel);
     // Match the original Android app; UI indexes are not protocol effect IDs.
     m_effect->addItem(tr("常亮"), 0);
@@ -386,14 +389,18 @@ void MainDialog::syncColorBrightness() {
     m_brightness->setValue(level); m_brightnessValue->setValue(level);
 }
 
-void MainDialog::applyLight(bool includeWarm) {
-    m_adjustTimer.stop(); m_pendingWarm = false;
+void MainDialog::applyLight(bool includeWarm, bool selectChannel) {
+    m_adjustTimer.stop(); m_pendingWarm = false; m_pendingBrightness = false;
+    if (!selectChannel && m_colorUsesWhite) {
+        sendCommand(ilight::command(1, 3, 2, {m_brightness->value()}));
+        return;
+    }
     if (includeWarm && m_colorUsesWhite && m_coldWarmSupported.value_or(false)) {
         sendCommand(ilight::command(1, 3, 4, {m_brightness->value(), m_warm->value()}));
         return;
     }
     if (lampType() == 2) {
-        if (isWhiteColor()) {
+        if (selectChannel && isWhiteColor()) {
             // Android LampManager routes neutral white to the dedicated white LEDs.
             m_colorUsesWhite = true;
             sendCommand(ilight::command(1, 3, 1, {1}));

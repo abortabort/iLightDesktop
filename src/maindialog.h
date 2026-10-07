@@ -34,7 +34,7 @@ private:
     void updateControls();
     void updatePreview();
     void syncColorBrightness();
-    void applyLight(bool includeWarm);
+    void applyLight(bool includeWarm, bool selectChannel = true);
     void sendCommand(const QByteArray &command);
     void receiveFeedback(const QByteArray &command);
     void appendLog(const QString &text);
@@ -75,6 +75,7 @@ private:
     bool m_demo = false;
     bool m_connecting = false;
     bool m_pendingWarm = false;
+    bool m_pendingBrightness = false;
     bool m_power = true;
     bool m_swapRedGreen = false;
     bool m_colorUsesWhite = false;
