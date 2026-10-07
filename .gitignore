@@ -1,0 +1,8 @@
+/build/
+/dist/
+*.user
+*.zip
+*.log
+*.log.old
+ilight.ini
+.vs/
